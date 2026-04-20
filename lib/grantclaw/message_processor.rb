@@ -12,13 +12,17 @@ module Grantclaw
       @logger = logger
     end
 
-    def process(user_message:, conversation_history: [], source: "unknown")
+    # on_status: optional callback proc that receives a status string
+    #   e.g., "Thinking...", "Running tool: stripe", "Generating response..."
+    #   Called with nil to clear status.
+    def process(user_message:, conversation_history: [], source: "unknown", on_status: nil)
       messages = build_messages(user_message, conversation_history)
       tools = @registry.schemas
 
       iterations = 0
       loop do
         iterations += 1
+        on_status&.call("Thinking...")
         @logger.info("llm", "Request to #{source} | tools=#{tools.length}")
 
         response = @llm.chat(messages: messages, tools: tools)
@@ -29,22 +33,27 @@ module Grantclaw
 
         if response[:tool_calls].nil? || response[:tool_calls].empty?
           @logger.info("llm", "Response: text")
+          on_status&.call(nil)
           return { role: "assistant", content: response[:content] }
         end
 
         if iterations >= MAX_TOOL_ITERATIONS
           @logger.warn("llm", "Hit max tool iterations (#{MAX_TOOL_ITERATIONS}), bailing out")
+          on_status&.call(nil)
           return { role: "assistant", content: response[:content] || "I've reached my tool call limit. Here's what I have so far." }
         end
 
         messages << { role: "assistant", content: response[:content], tool_calls: response[:tool_calls] }
 
         response[:tool_calls].each do |tc|
+          on_status&.call("Running tool: #{tc[:name]}")
           @logger.info("tool", "#{tc[:name]}(#{tc[:arguments].inspect})")
           result = @registry.execute(tc[:name], tc[:arguments])
           @logger.info("tool", "#{tc[:name]} -> #{result.to_s[0..200]}")
           messages << { role: "tool", tool_call_id: tc[:id], content: result.to_s }
         end
+
+        on_status&.call("Generating response...")
       end
     end
 

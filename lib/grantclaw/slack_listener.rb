@@ -140,8 +140,10 @@ module Grantclaw
       # Process in a thread to not block the EventMachine reactor
       message_ts = event["ts"]
       Thread.new do
-        # Show thinking indicator
         add_reaction("eyes", channel_id, message_ts)
+
+        # Status callback for assistant thread status indicator
+        status_cb = ->(status) { set_thread_status(channel_id, thread_ts, status) }
 
         history = fetch_thread_history(channel_id, thread_ts, message_ts)
 
@@ -149,7 +151,8 @@ module Grantclaw
           result = @processor.process(
             user_message: clean_text,
             conversation_history: history,
-            source: "slack"
+            source: "slack",
+            on_status: status_cb
           )
 
           remove_reaction("eyes", channel_id, message_ts)
@@ -162,6 +165,7 @@ module Grantclaw
         rescue => e
           @logger.error("slack", "Error processing message: #{e.class}: #{e.message}")
           remove_reaction("eyes", channel_id, message_ts)
+          set_thread_status(channel_id, thread_ts, nil)
           begin
             @web_client.chat_postMessage(
               channel: channel_id,
@@ -173,6 +177,18 @@ module Grantclaw
           end
         end
       end
+    end
+
+    def set_thread_status(channel, thread_ts, status)
+      return unless thread_ts
+
+      @web_client.assistant_threads_setStatus(
+        channel_id: channel,
+        thread_ts: thread_ts,
+        status: status || ""
+      )
+    rescue => e
+      @logger.debug("slack", "Could not set thread status: #{e.message}")
     end
 
     def add_reaction(emoji, channel, timestamp)
