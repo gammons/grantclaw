@@ -7,7 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY Gemfile Gemfile.lock ./
-RUN bundle install --without test && \
+ENV BUNDLE_WITHOUT="test"
+RUN bundle install && \
     rm -rf /usr/local/bundle/cache/*.gem
 
 COPY lib/ lib/
