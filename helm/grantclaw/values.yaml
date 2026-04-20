@@ -1,0 +1,36 @@
+image:
+  repository: ghcr.io/grantclaw/grantclaw
+  tag: latest
+
+bot:
+  name: example
+  config: |
+    name: example
+    llm:
+      provider: openrouter
+      model: anthropic/claude-sonnet-4-20250514
+      max_tokens: 4096
+    schedule:
+      heartbeat: "*/10 * * * *"
+    context:
+      system_files: [role.md]
+      memory_file: memory.md
+  files:
+    role.md: |
+      You are a helpful assistant.
+    memory.md: |
+      No memories yet.
+
+secrets:
+  existingSecret: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+persistence:
+  size: 1Gi

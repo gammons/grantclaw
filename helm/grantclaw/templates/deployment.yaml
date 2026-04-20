@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "grantclaw.fullname" . }}
+  labels:
+    {{- include "grantclaw.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: grantclaw
+      app.kubernetes.io/instance: {{ .Values.bot.name }}
+  template:
+    metadata:
+      labels:
+        {{- include "grantclaw.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      containers:
+        - name: grantclaw
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          args: ["--bot", "/config", "--data", "/data"]
+          {{- if .Values.secrets.existingSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.secrets.existingSecret }}
+          {{- end }}
+          env:
+            - name: GRANTCLAW_DATA_DIR
+              value: /data
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            exec:
+              command: ["ruby", "-e", "exit 0"]
+            initialDelaySeconds: 10
+            periodSeconds: 60
+          securityContext:
+            readOnlyRootFilesystem: false
+            allowPrivilegeEscalation: false
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "grantclaw.fullname" . }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "grantclaw.fullname" . }}-data
