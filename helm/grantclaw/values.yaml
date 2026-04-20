@@ -2,6 +2,18 @@ image:
   repository: ghcr.io/gammons/grantclaw
   tag: latest
 
+# --- Bot configuration ---
+# Two modes for providing bot files:
+#
+# 1. File-based (recommended): Copy your bot directory contents into botfiles/
+#    before running helm install. The chart auto-discovers all files there.
+#    Example: cp /path/to/my-bot/* helm/grantclaw/botfiles/
+#
+# 2. Values-based (inline): Set bot.config and bot.files below.
+#    Useful for simple bots or CI pipelines that use --set-file.
+#
+# If botfiles/ contains any files, mode 1 is used and bot.config/bot.files are ignored.
+
 bot:
   name: example
   config: |

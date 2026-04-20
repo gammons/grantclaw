@@ -5,9 +5,17 @@ metadata:
   labels:
     {{- include "grantclaw.labels" . | nindent 4 }}
 data:
+  {{- $botfiles := .Files.Glob "botfiles/*" }}
+  {{- if $botfiles }}
+  {{- range $path, $content := $botfiles }}
+  {{ base $path }}: |
+    {{- $content | toString | nindent 4 }}
+  {{- end }}
+  {{- else }}
   config.yaml: |
     {{- .Values.bot.config | nindent 4 }}
   {{- range $name, $content := .Values.bot.files }}
   {{ $name }}: |
     {{- $content | nindent 4 }}
+  {{- end }}
   {{- end }}
