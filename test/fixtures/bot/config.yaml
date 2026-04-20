@@ -1,0 +1,24 @@
+name: test-bot
+
+slack:
+  channels:
+    - id: C12345
+      name: general
+      require_mention: true
+  dm_policy: open
+
+llm:
+  provider: openrouter
+  model: anthropic/claude-sonnet-4-20250514
+  max_tokens: 1024
+
+schedule:
+  heartbeat: "*/10 * * * *"
+
+context:
+  system_files:
+    - role.md
+  memory_file: memory.md
+
+logging:
+  level: debug
