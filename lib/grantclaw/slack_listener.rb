@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
 require "slack-ruby-client"
+require "faye/websocket"
+require "eventmachine"
+require "json"
+require "net/http"
+require "uri"
 
 module Grantclaw
   class SlackListener
@@ -10,19 +15,28 @@ module Grantclaw
       @logger = logger
       @bot_user_id = nil
 
-      setup_clients
+      @web_client = Slack::Web::Client.new(token: ENV.fetch("SLACK_BOT_TOKEN"))
+      @app_token = ENV.fetch("SLACK_APP_TOKEN")
     end
 
     def start
       @logger.info("slack", "Connecting to Slack in Socket Mode...")
       fetch_bot_identity
-      register_handlers
-      @socket_client.start_async
+
+      # Run EventMachine in a separate thread so it doesn't block
+      @em_thread = Thread.new do
+        EM.run do
+          connect_socket_mode
+        end
+      end
+
       @logger.info("slack", "Slack listener started")
     end
 
     def stop
       @logger.info("slack", "Slack listener stopping")
+      EM.stop if EM.reactor_running?
+      @em_thread&.join(5)
     end
 
     def web_client
@@ -31,40 +45,86 @@ module Grantclaw
 
     private
 
-    def setup_clients
-      Slack.configure do |c|
-        c.token = ENV.fetch("SLACK_BOT_TOKEN")
+    def connect_socket_mode
+      wss_url = obtain_wss_url
+      unless wss_url
+        @logger.error("slack", "Could not obtain Socket Mode WSS URL")
+        return
       end
 
-      @web_client = Slack::Web::Client.new
-      @socket_client = Slack::RealTime::Client.new(
-        token: ENV.fetch("SLACK_APP_TOKEN"),
-        websocket_ping: 30
-      )
+      @logger.info("slack", "Connecting to Socket Mode WSS...")
+      ws = Faye::WebSocket::Client.new(wss_url)
+
+      ws.on :open do |_event|
+        @logger.info("slack", "Socket Mode connected")
+      end
+
+      ws.on :message do |event|
+        handle_envelope(ws, event.data)
+      end
+
+      ws.on :close do |event|
+        @logger.warn("slack", "Socket Mode disconnected (code=#{event.code}). Reconnecting in 5s...")
+        EM.add_timer(5) { connect_socket_mode }
+      end
     end
 
-    def fetch_bot_identity
-      auth = @web_client.auth_test
-      @bot_user_id = auth["user_id"]
-      @logger.info("slack", "Connected as #{auth['user']} (#{@bot_user_id})")
+    def obtain_wss_url
+      uri = URI("https://slack.com/api/apps.connections.open")
+      req = Net::HTTP::Post.new(uri)
+      req["Authorization"] = "Bearer #{@app_token}"
+      req["Content-Type"] = "application/x-www-form-urlencoded"
+
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = true
+      response = http.request(req)
+      data = JSON.parse(response.body)
+
+      if data["ok"]
+        data["url"]
+      else
+        @logger.error("slack", "apps.connections.open failed: #{data['error']}")
+        nil
+      end
     rescue => e
-      @logger.warn("slack", "Could not fetch bot identity: #{e.message}")
+      @logger.error("slack", "Failed to obtain WSS URL: #{e.message}")
+      nil
     end
 
-    def register_handlers
-      @socket_client.on :message do |data|
-        handle_message(data)
+    def handle_envelope(ws, raw)
+      envelope = JSON.parse(raw)
+      envelope_id = envelope["envelope_id"]
+
+      # Acknowledge immediately
+      ws.send(JSON.generate({ envelope_id: envelope_id })) if envelope_id
+
+      type = envelope["type"]
+      case type
+      when "events_api"
+        event = envelope.dig("payload", "event")
+        handle_event(event) if event
+      when "slash_commands"
+        # Ignore for now
+      when "interactive"
+        # Ignore for now
+      when "disconnect"
+        @logger.info("slack", "Received disconnect request, will reconnect")
       end
+    rescue => e
+      @logger.error("slack", "Error handling envelope: #{e.class}: #{e.message}")
     end
 
-    def handle_message(data)
-      return if data["user"] == @bot_user_id
-      return if data["subtype"] && data["subtype"] != "message_replied"
+    def handle_event(event)
+      type = event["type"]
+      return unless type == "message" || type == "app_mention"
 
-      channel_id = data["channel"]
-      text = data["text"] || ""
-      thread_ts = data["thread_ts"] || data["ts"]
-      is_dm = data["channel_type"] == "im"
+      return if event["user"] == @bot_user_id
+      return if event["subtype"] && event["subtype"] != "message_replied"
+
+      channel_id = event["channel"]
+      text = event["text"] || ""
+      thread_ts = event["thread_ts"] || event["ts"]
+      is_dm = event["channel_type"] == "im"
 
       return unless allowed_channel?(channel_id, is_dm)
 
@@ -73,31 +133,47 @@ module Grantclaw
       end
 
       clean_text = text.gsub(/<@#{@bot_user_id}>/, "").strip
+      return if clean_text.empty?
 
-      @logger.info("slack", "Message from #{data['user']} in #{channel_id}: #{clean_text[0..80]}")
+      @logger.info("slack", "Message from #{event['user']} in #{channel_id}: #{clean_text[0..80]}")
 
-      history = fetch_thread_history(channel_id, thread_ts, data["ts"])
+      # Process in a thread to not block the EventMachine reactor
+      Thread.new do
+        history = fetch_thread_history(channel_id, thread_ts, event["ts"])
 
-      begin
-        result = @processor.process(
-          user_message: clean_text,
-          conversation_history: history,
-          source: "slack"
-        )
+        begin
+          result = @processor.process(
+            user_message: clean_text,
+            conversation_history: history,
+            source: "slack"
+          )
 
-        @web_client.chat_postMessage(
-          channel: channel_id,
-          text: result[:content],
-          thread_ts: thread_ts
-        )
-      rescue => e
-        @logger.error("slack", "Error processing message: #{e.class}: #{e.message}")
-        @web_client.chat_postMessage(
-          channel: channel_id,
-          text: "Sorry, I encountered an error processing your message.",
-          thread_ts: thread_ts
-        )
+          @web_client.chat_postMessage(
+            channel: channel_id,
+            text: result[:content],
+            thread_ts: thread_ts
+          )
+        rescue => e
+          @logger.error("slack", "Error processing message: #{e.class}: #{e.message}")
+          begin
+            @web_client.chat_postMessage(
+              channel: channel_id,
+              text: "Sorry, I encountered an error processing your message.",
+              thread_ts: thread_ts
+            )
+          rescue => e2
+            @logger.error("slack", "Could not send error message: #{e2.message}")
+          end
+        end
       end
+    end
+
+    def fetch_bot_identity
+      auth = @web_client.auth_test
+      @bot_user_id = auth["user_id"]
+      @logger.info("slack", "Connected as #{auth['user']} (#{@bot_user_id})")
+    rescue => e
+      @logger.warn("slack", "Could not fetch bot identity: #{e.message}")
     end
 
     def allowed_channel?(channel_id, is_dm)
