@@ -13,7 +13,7 @@ class TestConfig < Minitest::Test
 
   def test_loads_llm_config
     assert_equal "openrouter", @config.llm["provider"]
-    assert_equal "anthropic/claude-sonnet-4-20250514", @config.llm["model"]
+    assert_equal "anthropic/claude-sonnet-4", @config.llm["model"]
     assert_equal 1024, @config.llm["max_tokens"]
   end
 

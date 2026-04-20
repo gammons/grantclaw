@@ -5,7 +5,7 @@ require_relative "../../test_helper"
 class TestOpenRouter < Minitest::Test
   def setup
     ENV["OPENROUTER_API_KEY"] = "test-key"
-    @adapter = Grantclaw::LLM::OpenRouter.new(model: "anthropic/claude-sonnet-4-20250514", max_tokens: 1024)
+    @adapter = Grantclaw::LLM::OpenRouter.new(model: "anthropic/claude-sonnet-4", max_tokens: 1024)
   end
 
   def teardown

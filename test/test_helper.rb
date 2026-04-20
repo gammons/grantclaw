@@ -13,7 +13,7 @@ def minimal_config(overrides = {})
     "name" => "test-bot",
     "llm" => {
       "provider" => "openrouter",
-      "model" => "anthropic/claude-sonnet-4-20250514",
+      "model" => "anthropic/claude-sonnet-4",
       "max_tokens" => 1024
     },
     "context" => {
