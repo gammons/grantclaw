@@ -1,0 +1,63 @@
+# frozen_string_literal: true
+
+module Grantclaw
+  class MessageProcessor
+    MAX_TOOL_ITERATIONS = 10
+
+    def initialize(llm:, memory:, tool_registry:, system_prompt:, logger:)
+      @llm = llm
+      @memory = memory
+      @registry = tool_registry
+      @system_prompt = system_prompt
+      @logger = logger
+    end
+
+    def process(user_message:, conversation_history: [], source: "unknown")
+      messages = build_messages(user_message, conversation_history)
+      tools = @registry.schemas
+
+      iterations = 0
+      loop do
+        iterations += 1
+        @logger.info("llm", "Request to #{source} | tools=#{tools.length}")
+
+        response = @llm.chat(messages: messages, tools: tools)
+
+        if response[:usage]
+          @logger.info("llm", "Usage: in=#{response[:usage][:input]} out=#{response[:usage][:output]}")
+        end
+
+        if response[:tool_calls].nil? || response[:tool_calls].empty?
+          @logger.info("llm", "Response: text")
+          return { role: "assistant", content: response[:content] }
+        end
+
+        if iterations >= MAX_TOOL_ITERATIONS
+          @logger.warn("llm", "Hit max tool iterations (#{MAX_TOOL_ITERATIONS}), bailing out")
+          return { role: "assistant", content: response[:content] || "I've reached my tool call limit. Here's what I have so far." }
+        end
+
+        messages << { role: "assistant", content: response[:content], tool_calls: response[:tool_calls] }
+
+        response[:tool_calls].each do |tc|
+          @logger.info("tool", "#{tc[:name]}(#{tc[:arguments].inspect})")
+          result = @registry.execute(tc[:name], tc[:arguments])
+          @logger.info("tool", "#{tc[:name]} -> #{result.to_s[0..200]}")
+          messages << { role: "tool", tool_call_id: tc[:id], content: result.to_s }
+        end
+      end
+    end
+
+    private
+
+    def build_messages(user_message, conversation_history)
+      memory_content = @memory.read
+      full_system = [@system_prompt, memory_content].reject(&:empty?).join("\n---\n")
+
+      messages = [{ role: "system", content: full_system }]
+      messages.concat(conversation_history) if conversation_history.any?
+      messages << { role: "user", content: user_message }
+      messages
+    end
+  end
+end
