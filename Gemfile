@@ -3,7 +3,7 @@ source "https://rubygems.org"
 
 gem "faraday", "~> 2.9"
 gem "slack-ruby-client", "~> 2.3"
-gem "async-websocket", "~> 0.30"
+gem "async-websocket", "~> 0.8.0"
 gem "rufus-scheduler", "~> 3.9"
 gem "reline"
 gem "dotenv", "~> 3.1"
