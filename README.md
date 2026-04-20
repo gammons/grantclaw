@@ -227,6 +227,102 @@ persistence:
   size: 1Gi
 ```
 
+### Bots that need extra system tools
+
+Some bots need binaries that aren't in the base image. For example, an SRE bot needs `kubectl`. The Helm chart supports this via init containers, extra volumes, and extra environment variables.
+
+Here's how to deploy a bot with kubectl access:
+
+```yaml
+image:
+  repository: ghcr.io/youruser/grantclaw
+  tag: latest
+
+bot:
+  name: grid
+  config: |
+    name: grid
+    llm:
+      provider: openrouter
+      model: anthropic/claude-sonnet-4
+    schedule:
+      heartbeat: "*/10 * * * *"
+    context:
+      system_files: [role.md, heartbeat.md]
+      memory_file: memory.md
+  files:
+    role.md: |
+      # Grid - SRE Bot
+      You are Grid, an SRE and infrastructure watchdog...
+    heartbeat.md: |
+      # Heartbeat Tasks
+      ...
+    memory.md: |
+      # Memory
+      ...
+
+secrets:
+  existingSecret: grantclaw-grid-env
+
+resources:
+  requests: { cpu: 400m, memory: 768Mi }
+  limits: { cpu: 3000m, memory: 4Gi }
+
+persistence:
+  size: 5Gi
+
+# ServiceAccount for RBAC (kubectl needs cluster permissions)
+serviceAccount:
+  create: true
+
+# Make kubectl available on PATH and point to kubeconfig
+extraEnv:
+  - name: KUBECONFIG
+    value: /home/grantclaw/.kube/config
+  - name: PATH
+    value: /tools:/usr/local/bundle/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Mount kubeconfig from a secret + shared tools directory
+extraVolumeMounts:
+  - name: kubeconfig
+    mountPath: /home/grantclaw/.kube
+    readOnly: true
+  - name: tools
+    mountPath: /tools
+
+extraVolumes:
+  - name: kubeconfig
+    secret:
+      secretName: grid-kubeconfig
+  - name: tools
+    emptyDir: {}
+
+# Download kubectl at pod startup
+initContainers:
+  - name: install-kubectl
+    image: ghcr.io/youruser/grantclaw:latest
+    command:
+      - sh
+      - -c
+      - |
+        ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+        curl -LsSo /tools/kubectl \
+          "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/${ARCH}/kubectl"
+        chmod +x /tools/kubectl
+    volumeMounts:
+      - name: tools
+        mountPath: /tools
+```
+
+How it works:
+
+1. The **init container** downloads `kubectl` to an `emptyDir` volume at `/tools`
+2. The **`PATH` env var** includes `/tools`, so the bot's `shell_exec` tool can find `kubectl`
+3. The **kubeconfig** is mounted from a Kubernetes Secret
+4. The **ServiceAccount** is created so you can bind RBAC roles to it (create a `ClusterRoleBinding` separately)
+
+This same pattern works for any binary — `gh` (GitHub CLI), `aws`, `helm`, `psql`, etc. Just add more downloads to the init container.
+
 ## LLM providers
 
 | Provider | Config | Env var |
