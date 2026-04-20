@@ -138,8 +138,12 @@ module Grantclaw
       @logger.info("slack", "Message from #{event['user']} in #{channel_id}: #{clean_text[0..80]}")
 
       # Process in a thread to not block the EventMachine reactor
+      message_ts = event["ts"]
       Thread.new do
-        history = fetch_thread_history(channel_id, thread_ts, event["ts"])
+        # Show thinking indicator
+        add_reaction("eyes", channel_id, message_ts)
+
+        history = fetch_thread_history(channel_id, thread_ts, message_ts)
 
         begin
           result = @processor.process(
@@ -148,6 +152,8 @@ module Grantclaw
             source: "slack"
           )
 
+          remove_reaction("eyes", channel_id, message_ts)
+
           @web_client.chat_postMessage(
             channel: channel_id,
             text: result[:content],
@@ -155,6 +161,7 @@ module Grantclaw
           )
         rescue => e
           @logger.error("slack", "Error processing message: #{e.class}: #{e.message}")
+          remove_reaction("eyes", channel_id, message_ts)
           begin
             @web_client.chat_postMessage(
               channel: channel_id,
@@ -166,6 +173,18 @@ module Grantclaw
           end
         end
       end
+    end
+
+    def add_reaction(emoji, channel, timestamp)
+      @web_client.reactions_add(name: emoji, channel: channel, timestamp: timestamp)
+    rescue => e
+      @logger.debug("slack", "Could not add reaction: #{e.message}")
+    end
+
+    def remove_reaction(emoji, channel, timestamp)
+      @web_client.reactions_remove(name: emoji, channel: channel, timestamp: timestamp)
+    rescue => e
+      @logger.debug("slack", "Could not remove reaction: #{e.message}")
     end
 
     def fetch_bot_identity
