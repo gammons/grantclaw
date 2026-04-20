@@ -22,7 +22,8 @@ module Grantclaw
           return "Error: Slack client not configured"
         end
 
-        opts = { channel: channel, text: text }
+        formatted = SlackFormatter.markdown_to_mrkdwn(text)
+        opts = { channel: channel, text: formatted }
         opts[:thread_ts] = thread_ts if thread_ts
         self.class.slack_client.chat_postMessage(**opts)
         "Message posted to #{channel}."
