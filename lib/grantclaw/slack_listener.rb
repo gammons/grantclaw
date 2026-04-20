@@ -129,7 +129,10 @@ module Grantclaw
       return unless allowed_channel?(channel_id, is_dm)
 
       if requires_mention?(channel_id, is_dm) && !mentioned?(text)
-        return
+        # Always respond in threads the bot started (no mention needed)
+        is_own_thread = event["thread_ts"] && event["thread_ts"] != event["ts"] &&
+                        bot_owns_thread?(channel_id, event["thread_ts"])
+        return unless is_own_thread
       end
 
       clean_text = text.gsub(/<@#{@bot_user_id}>/, "").strip
@@ -235,6 +238,17 @@ module Grantclaw
       return false unless @bot_user_id
 
       text.include?("<@#{@bot_user_id}>")
+    end
+
+    def bot_owns_thread?(channel_id, thread_ts)
+      return false unless @bot_user_id
+
+      response = @web_client.conversations_replies(channel: channel_id, ts: thread_ts, limit: 1)
+      parent = response["messages"]&.first
+      parent && parent["user"] == @bot_user_id
+    rescue => e
+      @logger.debug("slack", "Could not check thread ownership: #{e.message}")
+      false
     end
 
     def fetch_thread_history(channel, thread_ts, current_ts)
