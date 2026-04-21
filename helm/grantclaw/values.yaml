@@ -13,6 +13,33 @@ image:
 #    Useful for simple bots or CI pipelines that use --set-file.
 #
 # If botfiles/ contains any files, mode 1 is used and bot.config/bot.files are ignored.
+#
+# --- Pod filesystem layout ---
+#
+#   /config/            ← ConfigMap (read-only). Bot config + system prompt files.
+#   /config/tools/      ← ConfigMap (read-only). Custom .rb tool files, auto-loaded by grantclaw.
+#   /config/docs/       ← ConfigMap (read-only). Reference docs, readable on demand via shell_exec.
+#   /data/              ← PVC (writable). Memory, state, credentials. Persists across restarts.
+#
+# --- How to deploy a bot ---
+#
+#   # 1. Copy bot files into the chart (clean first)
+#   rm -f helm/grantclaw/botfiles/*.md helm/grantclaw/botfiles/*.yaml
+#   rm -f helm/grantclaw/botfiles/tools/*.rb helm/grantclaw/botfiles/docs/*.md
+#   cp my-bot/config.yaml my-bot/*.md  helm/grantclaw/botfiles/
+#
+#   # 2. Copy custom tools (if any)
+#   cp my-bot/tools/*.rb  helm/grantclaw/botfiles/tools/
+#
+#   # 3. Copy reference docs (if any -- flattened, basenames must be unique)
+#   find my-bot/docs -name "*.md" -exec cp {} helm/grantclaw/botfiles/docs/ \;
+#
+#   # 4. Deploy
+#   helm install my-bot helm/grantclaw -n openclaw -f my-bot/values.yaml
+#
+# NOTE: botfiles/ is gitignored -- it's a staging area, not a source of truth.
+# The bot config directories (e.g., grid-grantclaw/, sage-grantclaw/) in the
+# openclaw-helm repo are the source of truth.
 
 bot:
   name: example
