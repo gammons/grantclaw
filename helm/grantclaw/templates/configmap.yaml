@@ -41,3 +41,25 @@ data:
   {{- end }}
   {{- end }}
 {{- end }}
+---
+{{- $docfiles := .Files.Glob "botfiles/docs/*" }}
+{{- if or $docfiles .Values.bot.docs }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "grantclaw.fullname" . }}-docs
+  labels:
+    {{- include "grantclaw.labels" . | nindent 4 }}
+data:
+  {{- if $docfiles }}
+  {{- range $path, $content := $docfiles }}
+  {{ base $path }}: |
+    {{- $content | toString | nindent 4 }}
+  {{- end }}
+  {{- else }}
+  {{- range $name, $content := .Values.bot.docs }}
+  {{ $name }}: |
+    {{- $content | nindent 4 }}
+  {{- end }}
+  {{- end }}
+{{- end }}

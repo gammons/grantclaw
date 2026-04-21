@@ -53,6 +53,12 @@ spec:
               mountPath: /config/tools
               readOnly: true
             {{- end }}
+            {{- $docfiles := .Files.Glob "botfiles/docs/*" }}
+            {{- if or $docfiles .Values.bot.docs }}
+            - name: docs
+              mountPath: /config/docs
+              readOnly: true
+            {{- end }}
             - name: data
               mountPath: /data
             {{- with .Values.extraVolumeMounts }}
@@ -75,6 +81,12 @@ spec:
         - name: tools
           configMap:
             name: {{ include "grantclaw.fullname" . }}-tools
+        {{- end }}
+        {{- $docfiles := .Files.Glob "botfiles/docs/*" }}
+        {{- if or $docfiles .Values.bot.docs }}
+        - name: docs
+          configMap:
+            name: {{ include "grantclaw.fullname" . }}-docs
         {{- end }}
         - name: data
           persistentVolumeClaim:
