@@ -11,6 +11,8 @@ module Grantclaw
         @conn = Faraday.new(url: BASE_URL) do |f|
           f.request :json
           f.response :json
+          f.options.timeout = 120
+          f.options.open_timeout = 15
           f.adapter Faraday.default_adapter
         end
       end

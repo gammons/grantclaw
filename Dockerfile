@@ -3,6 +3,7 @@ FROM ruby:4.0-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    jq \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
