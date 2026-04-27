@@ -135,6 +135,13 @@ module Ezclaw
         return unless is_own_thread
       end
 
+      # If someone else is specifically mentioned (but not us), stay quiet --
+      # the user is talking to that person, not the bot
+      if mentions_other_user?(text) && !mentioned?(text)
+        @logger.debug("slack", "Skipping: message mentions another user, not us")
+        return
+      end
+
       clean_text = text.gsub(/<@#{@bot_user_id}>/, "").strip
       return if clean_text.empty?
 
@@ -238,6 +245,14 @@ module Ezclaw
       return false unless @bot_user_id
 
       text.include?("<@#{@bot_user_id}>")
+    end
+
+    def mentions_other_user?(text)
+      # Check if text contains any @mention that isn't our bot
+      mentions = text.scan(/<@(U[A-Z0-9]+)>/).flatten
+      return false if mentions.empty?
+
+      mentions.any? { |uid| uid != @bot_user_id }
     end
 
     def bot_owns_thread?(channel_id, thread_ts)
