@@ -3,17 +3,33 @@
 require "slack-ruby-client"
 require "faye/websocket"
 require "eventmachine"
+require "fileutils"
 require "json"
 require "net/http"
 require "uri"
 
 module Ezclaw
   class SlackListener
-    def initialize(processor:, config:, logger:)
+    # How often to run the traffic watchdog (seconds).
+    WATCHDOG_TICK_SECONDS = 30
+
+    # How long to wait before retrying after a transient failure to obtain
+    # the Socket Mode WSS URL (seconds).
+    WSS_URL_RETRY_SECONDS = 30
+
+    # How long to wait before reconnecting after a close/error (seconds).
+    RECONNECT_DELAY_SECONDS = 5
+
+    def initialize(processor:, config:, logger:, heartbeat_path: nil, watchdog_seconds: 90)
       @processor = processor
       @config = config
       @logger = logger
       @bot_user_id = nil
+      @heartbeat_path = heartbeat_path
+      @watchdog_seconds = watchdog_seconds
+      @last_event_at = nil
+      @reconnect_pending = false
+      @current_ws = nil
 
       @web_client = Slack::Web::Client.new(token: ENV.fetch("SLACK_BOT_TOKEN"))
       @app_token = ENV.fetch("SLACK_APP_TOKEN")
@@ -22,11 +38,13 @@ module Ezclaw
     def start
       @logger.info("slack", "Connecting to Slack in Socket Mode...")
       fetch_bot_identity
+      touch_heartbeat # mark alive at startup so liveness probe doesn't fire during initial connect
 
       # Run EventMachine in a separate thread so it doesn't block
       @em_thread = Thread.new do
         EM.run do
           connect_socket_mode
+          start_traffic_watchdog
         end
       end
 
@@ -46,27 +64,105 @@ module Ezclaw
     private
 
     def connect_socket_mode
+      clear_reconnect_pending
+
       wss_url = obtain_wss_url
       unless wss_url
-        @logger.error("slack", "Could not obtain Socket Mode WSS URL")
+        @logger.error("slack", "Could not obtain Socket Mode WSS URL, retrying in #{WSS_URL_RETRY_SECONDS}s")
+        schedule_reconnect(:wss_url_failed, delay: WSS_URL_RETRY_SECONDS) { connect_socket_mode }
         return
       end
 
       @logger.info("slack", "Connecting to Socket Mode WSS...")
       ws = Faye::WebSocket::Client.new(wss_url)
+      @current_ws = ws
 
       ws.on :open do |_event|
         @logger.info("slack", "Socket Mode connected")
+        record_event
+        touch_heartbeat
       end
 
       ws.on :message do |event|
+        record_event
+        touch_heartbeat
         handle_envelope(ws, event.data)
       end
 
-      ws.on :close do |event|
-        @logger.warn("slack", "Socket Mode disconnected (code=#{event.code}). Reconnecting in 5s...")
-        EM.add_timer(5) { connect_socket_mode }
+      ws.on :error do |event|
+        message = event.respond_to?(:message) ? event.message : event.inspect
+        @logger.warn("slack", "Socket Mode error: #{message}")
+        schedule_reconnect(:error) { connect_socket_mode }
       end
+
+      ws.on :close do |event|
+        @logger.warn("slack", "Socket Mode disconnected (code=#{event.code}). Reconnecting in #{RECONNECT_DELAY_SECONDS}s...")
+        @current_ws = nil
+        schedule_reconnect(:close) { connect_socket_mode }
+      end
+    end
+
+    # Returns :scheduled if a new reconnect was queued, :skipped if one was
+    # already pending. Reentrant from both :error and :close handlers.
+    def schedule_reconnect(reason, delay: RECONNECT_DELAY_SECONDS, &block)
+      if @reconnect_pending
+        @logger.debug("slack", "Reconnect already pending; skipping (#{reason})")
+        return :skipped
+      end
+
+      @reconnect_pending = true
+      if defined?(EM) && EM.reactor_running?
+        EM.add_timer(delay) { block.call }
+      else
+        # Test path: caller drives the block manually after inspecting state.
+      end
+      :scheduled
+    end
+
+    def clear_reconnect_pending
+      @reconnect_pending = false
+    end
+
+    def start_traffic_watchdog
+      EM.add_periodic_timer(WATCHDOG_TICK_SECONDS) do
+        next unless traffic_stale?
+
+        @logger.warn("slack", "No Socket Mode traffic for >#{@watchdog_seconds}s; closing socket to force reconnect")
+        ws = @current_ws
+        if ws
+          # Closing the socket triggers ws.on :close which schedules a reconnect.
+          begin
+            ws.close
+          rescue => e
+            @logger.warn("slack", "Error closing stale socket: #{e.class}: #{e.message}")
+            schedule_reconnect(:watchdog_close_failed) { connect_socket_mode }
+          end
+        else
+          # No socket at all — kick a reconnect directly.
+          schedule_reconnect(:watchdog_no_socket) { connect_socket_mode }
+        end
+        # Reset so we don't fire the watchdog repeatedly while reconnect is in flight.
+        @last_event_at = Time.now
+      end
+    end
+
+    def traffic_stale?
+      return false unless @last_event_at
+
+      Time.now - @last_event_at > @watchdog_seconds
+    end
+
+    def record_event
+      @last_event_at = Time.now
+    end
+
+    def touch_heartbeat
+      return unless @heartbeat_path
+
+      FileUtils.mkdir_p(File.dirname(@heartbeat_path))
+      FileUtils.touch(@heartbeat_path)
+    rescue => e
+      @logger.warn("slack", "Could not update heartbeat file #{@heartbeat_path}: #{e.class}: #{e.message}")
     end
 
     def obtain_wss_url

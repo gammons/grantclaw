@@ -123,7 +123,12 @@ module Ezclaw
 
       slack = nil
       if ENV["SLACK_BOT_TOKEN"] && ENV["SLACK_APP_TOKEN"]
-        slack = SlackListener.new(processor: @processor, config: @config, logger: @logger)
+        slack = SlackListener.new(
+          processor: @processor,
+          config: @config,
+          logger: @logger,
+          heartbeat_path: File.join(@data_dir, ".slack_alive")
+        )
         Tools::SlackPostTool.slack_client = slack.web_client
         Tools::SlackPostTool.repl_mode = false
         slack.start

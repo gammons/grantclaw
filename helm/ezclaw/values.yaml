@@ -74,6 +74,26 @@ resources:
 persistence:
   size: 1Gi
 
+# Liveness probe.
+#
+#   slackHeartbeat: when true and the bot uses Slack (SLACK_BOT_TOKEN/SLACK_APP_TOKEN
+#     are set in the secret), the probe checks that the Slack listener has
+#     touched /data/.slack_alive within `slackHeartbeatMaxAgeSeconds`. This
+#     catches silent Socket Mode disconnects that the framework does not detect
+#     (half-open TCP, missed :error events). When the file is stale, K8s
+#     restarts the pod, which re-establishes the WebSocket.
+#
+#   When slackHeartbeat is false (or the bot doesn't use Slack), the probe
+#     falls back to a no-op (`ruby -e exit 0`) which only proves the Ruby
+#     interpreter still runs.
+livenessProbe:
+  slackHeartbeat: false
+  slackHeartbeatMaxAgeSeconds: 180
+  initialDelaySeconds: 60
+  periodSeconds: 60
+  timeoutSeconds: 5
+  failureThreshold: 3
+
 # --- Optional extensions for bots that need extra system tools ---
 
 # ServiceAccount for RBAC (e.g., kubectl access)

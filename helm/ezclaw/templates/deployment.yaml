@@ -66,9 +66,24 @@ spec:
             {{- end }}
           livenessProbe:
             exec:
+              {{- if .Values.livenessProbe.slackHeartbeat }}
+              # Fail liveness if the Slack listener has not touched the heartbeat file
+              # within slackHeartbeatMaxAgeSeconds. K8s will restart the pod, which
+              # re-establishes the Socket Mode WebSocket.
+              command:
+                - sh
+                - -c
+                - |
+                  test -f /data/.slack_alive || exit 1
+                  age=$(( $(date +%s) - $(stat -c %Y /data/.slack_alive) ))
+                  test "$age" -lt {{ .Values.livenessProbe.slackHeartbeatMaxAgeSeconds }}
+              {{- else }}
               command: ["ruby", "-e", "exit 0"]
-            initialDelaySeconds: 10
-            periodSeconds: 60
+              {{- end }}
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds | default 10 }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds | default 60 }}
+            timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds | default 5 }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold | default 3 }}
           securityContext:
             readOnlyRootFilesystem: false
             allowPrivilegeEscalation: false
