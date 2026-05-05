@@ -87,6 +87,9 @@ spec:
           securityContext:
             readOnlyRootFilesystem: false
             allowPrivilegeEscalation: false
+        {{- with .Values.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       volumes:
         - name: config
           configMap:

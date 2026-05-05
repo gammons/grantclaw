@@ -94,6 +94,13 @@ livenessProbe:
   timeoutSeconds: 5
   failureThreshold: 3
 
+# Extra sidecar containers added alongside the main `ezclaw` container.
+# Use cases: docker-in-docker for bots that need a local Docker daemon,
+# code-server for browser IDE access, etc. Each entry is a full container
+# spec (name, image, env, securityContext, resources, probes, etc.).
+# Defaults to empty (no sidecars).
+extraContainers: []
+
 # --- Optional extensions for bots that need extra system tools ---
 
 # ServiceAccount for RBAC (e.g., kubectl access)
