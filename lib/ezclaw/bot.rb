@@ -141,20 +141,21 @@ module Ezclaw
       scheduler.start
 
       @logger.info("bot", "Bot running. Press Ctrl+C to stop.")
-      trap("INT") do
-        @logger.info("bot", "Shutting down...")
-        scheduler.stop
-        slack&.stop
-        exit(0)
-      end
-      trap("TERM") do
-        @logger.info("bot", "Shutting down...")
-        scheduler.stop
-        slack&.stop
-        exit(0)
-      end
 
-      sleep
+      # Trap handlers run in signal-trap context where most operations
+      # (mutex acquisition, Logger#synchronize, slack-ruby-client cleanup,
+      # rufus-scheduler shutdown) are forbidden and raise ThreadError.
+      # Push to a Queue (the only stdlib primitive documented as
+      # trap-safe) and run the actual cleanup in the main thread below.
+      shutdown_queue = Queue.new
+      trap("INT")  { shutdown_queue << "INT" }
+      trap("TERM") { shutdown_queue << "TERM" }
+
+      signal = shutdown_queue.pop  # blocks until a trap fires
+      @logger.info("bot", "Shutting down (#{signal})...")
+      scheduler.stop
+      slack&.stop
+      exit(0)
     end
   end
 end
