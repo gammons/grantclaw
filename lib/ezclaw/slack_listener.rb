@@ -20,7 +20,16 @@ module Ezclaw
     # How long to wait before reconnecting after a close/error (seconds).
     RECONNECT_DELAY_SECONDS = 5
 
-    def initialize(processor:, config:, logger:, heartbeat_path: nil, watchdog_seconds: 90)
+    # watchdog_seconds: how long to wait between Slack events before forcing a
+    # reconnect. Default 1800 (30 min). The 90s default we shipped originally
+    # was too aggressive — Slack's Socket Mode is intentionally idle during
+    # quiet periods (protocol-level pings handled by faye-websocket don't
+    # trigger ws.on :message), so a 90s threshold caused idle bots like Nex to
+    # disconnect every ~120s, losing events that arrived during the reconnect
+    # gap. 1800s is well below Slack's own ~60-min disconnect-envelope cadence
+    # while still catching the "silent for hours" failure mode the watchdog
+    # was originally designed to fix.
+    def initialize(processor:, config:, logger:, heartbeat_path: nil, watchdog_seconds: 1800)
       @processor = processor
       @config = config
       @logger = logger
