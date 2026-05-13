@@ -47,13 +47,13 @@ spec:
             - name: config
               mountPath: /config
               readOnly: true
-            {{- $toolfiles := .Files.Glob "botfiles/tools/*" }}
+            {{- $toolfiles := .Files.Glob (printf "botfiles/%s/tools/*" .Values.bot.name) }}
             {{- if or $toolfiles .Values.bot.tools }}
             - name: tools
               mountPath: /config/tools
               readOnly: true
             {{- end }}
-            {{- $docfiles := .Files.Glob "botfiles/docs/*" }}
+            {{- $docfiles := .Files.Glob (printf "botfiles/%s/docs/*" .Values.bot.name) }}
             {{- if or $docfiles .Values.bot.docs }}
             - name: docs
               mountPath: /config/docs
@@ -94,13 +94,13 @@ spec:
         - name: config
           configMap:
             name: {{ include "ezclaw.fullname" . }}
-        {{- $toolfiles := .Files.Glob "botfiles/tools/*" }}
+        {{- $toolfiles := .Files.Glob (printf "botfiles/%s/tools/*" .Values.bot.name) }}
         {{- if or $toolfiles .Values.bot.tools }}
         - name: tools
           configMap:
             name: {{ include "ezclaw.fullname" . }}-tools
         {{- end }}
-        {{- $docfiles := .Files.Glob "botfiles/docs/*" }}
+        {{- $docfiles := .Files.Glob (printf "botfiles/%s/docs/*" .Values.bot.name) }}
         {{- if or $docfiles .Values.bot.docs }}
         - name: docs
           configMap:

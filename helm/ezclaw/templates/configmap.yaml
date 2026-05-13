@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "ezclaw.labels" . | nindent 4 }}
 data:
-  {{- $botfiles := .Files.Glob "botfiles/*" }}
+  {{- $botfiles := .Files.Glob (printf "botfiles/%s/*" .Values.bot.name) }}
   {{- if $botfiles }}
   {{- range $path, $content := $botfiles }}
   {{ base $path }}: |
@@ -20,7 +20,7 @@ data:
   {{- end }}
   {{- end }}
 ---
-{{- $toolfiles := .Files.Glob "botfiles/tools/*" }}
+{{- $toolfiles := .Files.Glob (printf "botfiles/%s/tools/*" .Values.bot.name) }}
 {{- if or $toolfiles .Values.bot.tools }}
 apiVersion: v1
 kind: ConfigMap
@@ -42,7 +42,7 @@ data:
   {{- end }}
 {{- end }}
 ---
-{{- $docfiles := .Files.Glob "botfiles/docs/*" }}
+{{- $docfiles := .Files.Glob (printf "botfiles/%s/docs/*" .Values.bot.name) }}
 {{- if or $docfiles .Values.bot.docs }}
 apiVersion: v1
 kind: ConfigMap
