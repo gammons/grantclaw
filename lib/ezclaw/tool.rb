@@ -14,7 +14,18 @@ module Ezclaw
       end
 
       def param(name, type: :string, desc: nil, enum: nil, required: false, default: nil)
-        @params << { name: name, type: type, desc: desc, enum: enum, required: required, default: default }
+        entry = { name: name, type: type, desc: desc, enum: enum, required: required, default: default }
+        # Replace any existing entry with the same name. Re-declaring the
+        # same param (intentionally or via accidental file reload) must
+        # not accumulate duplicates - that previously produced schemas
+        # like `required: ["action", "action"]`, which ZAI rejects with
+        # HTTP 400 code 1210 ("Invalid API parameter").
+        existing_idx = @params.index { |p| p[:name] == name }
+        if existing_idx
+          @params[existing_idx] = entry
+        else
+          @params << entry
+        end
       end
 
       def tool_description
@@ -46,6 +57,12 @@ module Ezclaw
           properties[p[:name].to_s] = prop
           required << p[:name].to_s if p[:required]
         end
+
+        # Belt-and-suspenders: dedupe required even though `param` is now
+        # idempotent. Defends against any future code path that could
+        # produce duplicate @params entries. JSON Schema requires unique
+        # entries; ZAI's validator rejects duplicates with HTTP 400.
+        required.uniq!
 
         {
           name: tool_name,

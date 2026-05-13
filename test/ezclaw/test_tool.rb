@@ -62,4 +62,44 @@ class TestTool < Minitest::Test
     assert_includes result, "Error"
     assert_includes result, "boom"
   end
+
+  # Regression: re-declaring the same param (e.g. when a file gets
+  # re-loaded and the class body re-runs) must not accumulate duplicate
+  # entries. Previously this produced schemas with
+  # `required: ["action", "action"]`, which ZAI rejects with HTTP 400
+  # code 1210 ("Invalid API parameter").
+  def test_param_redeclaration_replaces_instead_of_appending
+    dup_class = Class.new(Ezclaw::Tool) do
+      desc "dup test"
+      param :action, type: :string, enum: %w[a b], required: true
+      # Simulate the class body re-running (which is what an accidental
+      # file reload does):
+      param :action, type: :string, enum: %w[a b], required: true
+      param :other, type: :string
+    end
+
+    # Exactly two params, action and other (not three).
+    assert_equal 2, dup_class.tool_params.length
+    assert_equal [:action, :other], dup_class.tool_params.map { |p| p[:name] }
+
+    # Required array has exactly one "action".
+    schema = dup_class.json_schema
+    assert_equal ["action"], schema[:parameters][:required]
+  end
+
+  # Belt-and-suspenders: even if duplicates somehow land in @params,
+  # the emitted schema must have a unique required array.
+  def test_json_schema_required_is_always_unique
+    dup_class = Class.new(Ezclaw::Tool) do
+      desc "dup schema"
+      param :action, required: true
+    end
+    # Inject a synthetic duplicate (bypassing the param helper)
+    dup_class.instance_variable_get(:@params) <<
+      { name: :action, type: :string, desc: nil, enum: nil, required: true, default: nil }
+    assert_equal 2, dup_class.tool_params.length
+
+    schema = dup_class.json_schema
+    assert_equal ["action"], schema[:parameters][:required]
+  end
 end
